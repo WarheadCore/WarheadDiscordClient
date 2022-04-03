@@ -17,31 +17,31 @@ CollectSourceFiles(
 # Group sources
 GroupSources(${CMAKE_CURRENT_SOURCE_DIR})
 
-add_definitions(-DWARHEAD_API_EXPORT_SHARED)
+add_definitions(-DWARHEAD_API_EXPORT_CLIENT)
 
-add_library(shared
+add_library(client
   ${PRIVATE_SOURCES})
 
 CollectIncludeDirectories(
   ${CMAKE_CURRENT_SOURCE_DIR}
   PUBLIC_INCLUDES)
 
-target_include_directories(shared
+target_include_directories(client
   PUBLIC
     ${PUBLIC_INCLUDES}
   PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
 
-target_link_libraries(shared
+target_link_libraries(client
   PRIVATE
     warhead-core-interface
   PUBLIC
-    common)
+    shared)
 
-set_target_properties(shared
+set_target_properties(client
   PROPERTIES
     FOLDER
       "src")
 
 # Install dynamic lib
-InstallDynamicLibrary(shared)
+InstallDynamicLibrary(client)

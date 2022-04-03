@@ -33,7 +33,7 @@ namespace Warhead::Asio
     public:
         explicit Resolver(IoContext& ioContext) : _impl(ioContext) { }
 
-        std::optional<boost::asio::ip::tcp::endpoint> Resolve(boost::asio::ip::tcp const& protocol, std::string const& host, std::string const& service)
+        std::optional<boost::asio::ip::tcp::endpoint> Resolve(boost::asio::ip::tcp const& protocol, std::string_view host, std::string const& service)
         {
             boost::system::error_code ec;
             boost::asio::ip::resolver_base::flags flagsResolver = boost::asio::ip::resolver_base::all_matching;

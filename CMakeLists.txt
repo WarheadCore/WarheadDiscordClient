@@ -22,7 +22,7 @@ message(STATUS "CMake version: ${CMAKE_VERSION}")
 cmake_policy(SET CMP0005 NEW)
 
 # Set projectname (must be done AFTER setting configurationtypes)
-project(WarheadDiscord VERSION 1.0.0 LANGUAGES CXX C)
+project(WarheadDiscordClient VERSION 1.0.0 LANGUAGES CXX C)
 
 # add this options before PROJECT keyword
 set(CMAKE_DISABLE_SOURCE_CHANGES ON)
@@ -55,7 +55,6 @@ include(DynamicLibInstall)
 include(PocoMacros)
 
 find_package(PCHSupport)
-find_package(MySQL REQUIRED)
 
 if (NOT WITHOUT_GIT)
   find_package(Git 1.7)

@@ -90,10 +90,10 @@
 #  define WH_SHARED_API WH_API_IMPORT
 #endif
 
-#ifdef WARHEAD_API_EXPORT_DISCORD
-#  define WH_DISCORD_API WH_API_EXPORT
+#ifdef WARHEAD_API_EXPORT_CLIENT
+#  define WH_CLIENT_API WH_API_EXPORT
 #else
-#  define WH_DISCORD_API WH_API_IMPORT
+#  define WH_CLIENT_API WH_API_IMPORT
 #endif
 
 typedef std::int64_t int64;

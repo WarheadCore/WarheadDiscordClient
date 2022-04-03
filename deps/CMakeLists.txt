@@ -14,9 +14,7 @@
 #
 
 add_subdirectory(boost)
-add_subdirectory(dpp)
 add_subdirectory(fmt)
-add_subdirectory(mysql)
 add_subdirectory(openssl)
 add_subdirectory(poco)
 add_subdirectory(threads)

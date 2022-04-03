@@ -32,7 +32,7 @@ macro(GenerateApp dir appName)
     PRIVATE
       warhead-core-interface
     PUBLIC
-      discord)
+      client)
 
   CollectIncludeDirectories(
     ${dir}
@@ -59,4 +59,4 @@ macro(GenerateApp dir appName)
   endif()
 endmacro()
 
-GenerateApp(${CMAKE_CURRENT_SOURCE_DIR} "WarheadDiscord")
+GenerateApp(${CMAKE_CURRENT_SOURCE_DIR} "WarheadDiscordClient")

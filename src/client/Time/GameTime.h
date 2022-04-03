@@ -15,40 +15,33 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __DISCORD_SHARED_DEFINES_H__
-#define __DISCORD_SHARED_DEFINES_H__
+#ifndef __GAMETIME_H
+#define __GAMETIME_H
 
 #include "Define.h"
+#include "Duration.h"
 
- /// List of Opcodes
-enum DiscordCode : uint16
+namespace GameTime
 {
-    // Client
-    CLIENT_SEND_HELLO = 1,
-    CLIENT_AUTH_SESSION,
-    CLIENT_SEND_MESSAGE,
-    CLIENT_SEND_MESSAGE_EMBED,
+    // Server start time
+    WH_CLIENT_API Seconds GetStartTime();
 
-    // Server
-    SERVER_SEND_AUTH_RESPONSE,
+    // Current server time (unix)
+    WH_CLIENT_API Seconds GetGameTime();
 
-    NUM_MSG_TYPES
-};
+    // Since server start
+    WH_CLIENT_API Milliseconds GetGameTimeMS();
 
-enum OpcodeMisc : uint16
-{
-    NUM_OPCODE_HANDLERS = NUM_MSG_TYPES,
-    NULL_OPCODE = 0x0000
-};
+    /// Current chrono system_clock time point
+    WH_CLIENT_API SystemTimePoint GetSystemTime();
 
-enum class DiscordAuthResponseCodes : uint8
-{
-    Ok,
-    Failed,
-    UnknownAccount,
-    Banned,
-    IncorrectPassword,
-    ServerOffline
-};
+    /// Current chrono steady_clock time point
+    WH_CLIENT_API TimePoint Now();
 
-#endif // __DISCORD_SHARED_DEFINES_H__
+    /// Uptime
+    WH_CLIENT_API Seconds GetUptime();
+
+    void UpdateGameTimers();
+}
+
+#endif
