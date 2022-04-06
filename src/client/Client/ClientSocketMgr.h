@@ -21,6 +21,7 @@
 #include "AsioHacksFwd.h"
 #include "DiscordPacket.h"
 #include "PacketQueue.h"
+#include <mutex>
 
 namespace Warhead::Asio
 {
@@ -36,7 +37,7 @@ public:
     static ClientSocketMgr* instance();
 
     void Initialize(Warhead::Asio::IoContext& ioContext);
-    void ConnectToServer();
+    void ConnectToServer(uint32 reconnectCount = 1);
     void Disconnect();
     void Update();
     void AddPacketToQueue(DiscordPacket const& packet);
@@ -44,6 +45,7 @@ public:
 private:
     void SendPacket(DiscordPacket const& packet);
 
+    std::mutex _newConnectLock;
     std::atomic<bool> _stopped{ false };
     std::unique_ptr<Warhead::Asio::DeadlineTimer> _updateTimer{ nullptr };
     std::shared_ptr<ClientSocket> _clientSocket;

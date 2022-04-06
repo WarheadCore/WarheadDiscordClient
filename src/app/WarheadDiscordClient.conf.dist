@@ -74,11 +74,25 @@ Discord.Server.Host = "wh.wowka.su"
 Discord.Server.Port = 1000
 
 #
-#    Discord.Server.Port
+#    Discord.Server.Account.Name
 #        Description: Account name for server
-#        Default:     "test"
+#        Default:     ""
 
-Discord.Server.AccountName = "test"
+Discord.Server.Account.Name = ""
+
+#
+#    Discord.Server.Account.Key
+#        Description: Account key for server
+#        Default:     ""
+
+Discord.Server.Account.Key = ""
+
+#
+#    Discord.Server.ID
+#        Description: Id for discord guild
+#        Default:     0
+
+Discord.Server.ID = 0
 ###################################################################################################
 
 ###################################################################################################

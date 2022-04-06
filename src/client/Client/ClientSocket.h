@@ -22,15 +22,7 @@
 #include "PacketQueue.h"
 #include "DiscordPacket.h"
 #include "DiscordSharedDefines.h"
-#include <boost/asio/io_context.hpp>
 #include <mutex>
-
-namespace Warhead::Asio
-{
-    class DeadlineTimer;
-}
-
-class WorldSocket;
 
 /// Manages all sockets connected to peers and network threads
 class WH_CLIENT_API ClientSocket : public Socket<ClientSocket>
@@ -38,18 +30,17 @@ class WH_CLIENT_API ClientSocket : public Socket<ClientSocket>
     using BaseSocket = Socket<ClientSocket>;
 
 public:
-    ClientSocket(tcp::socket&& socket, boost::asio::io_context& ioContext);
+    ClientSocket(tcp::socket&& socket);
 
     void Start() override;
-    void Stop();
     bool Update() override;
 
-    inline bool IsStoped() { return _stop; }
     inline bool IsAuthed() { return _authed; }
-
     inline void SetAccountName(std::string_view name) { _accountName = std::string(_accountName); }
+    inline Microseconds GetLatency() { return _latency; }
     
     void AddPacketToQueue(DiscordPacket const& packet);
+    void SendPingMessage();
 
 protected:
     void OnClose() override;
@@ -66,7 +57,10 @@ private:
     ReadDataHandlerResult ReadDataHandler();
     bool ReadHeaderHandler();
 
+    void SendAuthSession();
+
     void HandleAuthResponce(DiscordPacket& packet);
+    void HandlePong(DiscordPacket& packet);
     void LogOpcode(DiscordCode opcode);
 
     void SendPacket(DiscordPacket const* packet);
@@ -76,13 +70,13 @@ private:
     MessageBuffer _packetBuffer;
     bool _authed{ false };
     std::string _accountName;
+    std::string _accountKey;
+    int64 _serverID;
 
-    std::shared_ptr<WorldSocket> _worldSocket;
+    TimePoint _startTime;
+    Microseconds _latency{ 0us };
 
     PacketQueue<DiscordPacket> _bufferQueue;
-
-    std::unique_ptr<Warhead::Asio::DeadlineTimer> _updateTimer;
-    std::atomic<bool> _stop{ false };
 };
 
 #endif

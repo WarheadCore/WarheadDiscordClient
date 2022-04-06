@@ -16,60 +16,80 @@
  */
 
 #include "ClientSocket.h"
+#include "ClientSocketMgr.h"
 #include "DiscordPacketHeader.h"
 #include "DeadlineTimer.h"
 #include "IoContext.h"
 #include "Errors.h"
 #include "Log.h"
 #include "DiscordConfig.h"
+#include "Timer.h"
+#include "GitRevision.h"
+#include "SmartEnum.h"
 
-ClientSocket::ClientSocket(tcp::socket&& socket, boost::asio::io_context& ioContext) :
+namespace
+{
+    inline std::string GetOpcodeNameForLoggingImpl(DiscordCode opcode)
+    {
+        if (opcode < NUM_OPCODE_HANDLERS)
+            return Warhead::StringFormat("[{} 0x{:04X} ({})]",
+                EnumUtils::ToTitle(opcode), opcode, opcode);
+
+        return Warhead::StringFormat("[INVALID OPCODE 0x{:04X} ({})]", opcode, opcode);
+    }
+}
+
+constexpr auto WARHEAD_DISCORD_VERSION = 100000;
+//constexpr auto WARHEAD_DISCORD_VERSION_MAJOR = WARHEAD_DISCORD_VERSION / 100000;
+//constexpr auto WARHEAD_DISCORD_VERSION_MINOR = WARHEAD_DISCORD_VERSION / 100 % 1000;
+//constexpr auto WARHEAD_DISCORD_VERSION_PATCH = WARHEAD_DISCORD_VERSION % 100;
+
+ClientSocket::ClientSocket(tcp::socket&& socket) :
     Socket(std::move(socket))
 {
+    _accountName = CONF_GET_STR("Discord.Server.Account.Name");
+    _accountKey = CONF_GET_STR("Discord.Server.Account.Key");
+    _serverID = sDiscordConfig->GetOption<int64>("Discord.Server.ID");
+
+    if (!_serverID)
+    {
+        LOG_ERROR("discord", "> Empty server id");
+        sClientSocketMgr->Disconnect();
+        CloseSocket();
+    }
+
+    if (_accountName.empty())
+    {
+        LOG_ERROR("discord", "> Empty account name");
+        sClientSocketMgr->Disconnect();
+        CloseSocket();
+    }
+
+    if (_accountKey.empty())
+    {
+        LOG_ERROR("discord", "> Empty key");
+        sClientSocketMgr->Disconnect();
+        CloseSocket();
+    }
+
     _headerBuffer.Resize(sizeof(DiscordClientPktHeader));
-    _updateTimer = std::make_unique<Warhead::Asio::DeadlineTimer>(ioContext);
-
     SetNoDelay(true);
-
-    _accountName = CONF_GET_STR("Discord.Server.AccountName");
 }
 
 void ClientSocket::Start()
 {
     LOG_DEBUG("node", "Start process auth from server. Account name '{}'", _accountName);
-
-    DiscordPacket packet(CLIENT_AUTH_SESSION, 1);
-    packet << _accountName;
-    SendPacket(&packet);
-
-    _updateTimer->expires_from_now(boost::posix_time::milliseconds(1));
-    _updateTimer->async_wait([this](boost::system::error_code const&) { Update(); });
-
-    AsyncRead();
-}
-
-void ClientSocket::Stop()
-{
-    _updateTimer->cancel();
-    _stop = true;
-    BaseSocket::CloseSocket();
+    SendAuthSession();
 }
 
 void ClientSocket::OnClose()
 {
-    _stop = true;
     LOG_DEBUG("server", "> Disconnected from server");
 }
 
 bool ClientSocket::Update()
 {
-    if (_stop)
-        return false;
-
-    _updateTimer->expires_from_now(boost::posix_time::milliseconds(1));
-    _updateTimer->async_wait([this](boost::system::error_code const&) { Update(); });
-
-    if (_authed && IsOpen())
+    if (_authed)
     {
         DiscordPacket* queuedPacket{ nullptr };
 
@@ -185,10 +205,26 @@ ClientSocket::ReadDataHandlerResult ClientSocket::ReadDataHandler()
                 if (sessionGuard.try_lock())
                     LOG_ERROR("node", "{}: received duplicate SERVER_SEND_AUTH_RESPONSE", __FUNCTION__);
 
+                sClientSocketMgr->Disconnect();
                 return ReadDataHandlerResult::Error;
             }
 
             HandleAuthResponce(packet);
+            return ReadDataHandlerResult::Ok;
+        }
+        case SERVER_SEND_PONG:
+        {
+            if (!_authed)
+            {
+                // locking just to safely log offending user is probably overkill but we are disconnecting him anyway
+                if (sessionGuard.try_lock())
+                    LOG_ERROR("node", "{}: received SERVER_SEND_PONG without auth", __FUNCTION__);
+
+                sClientSocketMgr->Disconnect();
+                return ReadDataHandlerResult::Error;
+            }
+
+            HandlePong(packet);
             return ReadDataHandlerResult::Ok;
         }
         default:
@@ -198,20 +234,14 @@ ClientSocket::ReadDataHandlerResult ClientSocket::ReadDataHandler()
 
 void ClientSocket::LogOpcode(DiscordCode opcode)
 {
-    LOG_TRACE("network.opcode", "Client->Server: {}", opcode);
+    LOG_TRACE("network.opcode", "C->S: {}", GetOpcodeNameForLoggingImpl(opcode));
 }
 
 void ClientSocket::SendPacket(DiscordPacket const* packet)
 {
     if (!IsOpen())
     {
-        LOG_ERROR("node", "{}: Not open socket!", __FUNCTION__);
-        return;
-    }
-
-    if (_stop)
-    {
-        LOG_ERROR("node", "{}: Updating is stopped!", __FUNCTION__);
+        LOG_ERROR("discord", "{}: Not open socket!", __FUNCTION__);
         return;
     }
 
@@ -251,16 +281,66 @@ void ClientSocket::AddPacketToQueue(DiscordPacket const& packet)
 
 void ClientSocket::HandleAuthResponce(DiscordPacket& packet)
 {
+    using namespace std::chrono;
+
+    Microseconds diff = duration_cast<Microseconds>(steady_clock::now() - _startTime);
+
     uint8 code;
     packet >> code;
 
     DiscordAuthResponseCodes responseCode = static_cast<DiscordAuthResponseCodes>(code);
+    auto const& codeString = EnumUtils::ToTitle(responseCode);
 
-    if (responseCode == DiscordAuthResponseCodes::Ok)
+    if (responseCode != DiscordAuthResponseCodes::Ok)
     {
-        LOG_INFO("server", "Auth correct");
-        _authed = true;
+        LOG_INFO("server", "Auth incorrect. Code {}", codeString);
+        sClientSocketMgr->Disconnect();
+        return;
     }
-    else
-        LOG_INFO("server", "Auth incorrect. Code {}", code);
+
+    LOG_INFO("server", "[{}] Auth correct '{}'", Warhead::Time::ToTimeString(diff), codeString);
+    _authed = true;
+
+    SendPingMessage();
+}
+
+void ClientSocket::SendPingMessage()
+{
+    using namespace std::chrono;
+
+    Microseconds timeNow = duration_cast<Microseconds>(steady_clock::now().time_since_epoch());
+
+    DiscordPacket packetPing(CLIENT_SEND_PING, 1);
+    packetPing << int64(timeNow.count());
+    packetPing << int64(_latency.count());
+    SendPacket(&packetPing);
+}
+
+void ClientSocket::HandlePong(DiscordPacket& packet)
+{
+    int64 timePacket;
+    packet >> timePacket;
+
+    using namespace std::chrono;
+
+    Microseconds timeNow = duration_cast<Microseconds>(steady_clock::now().time_since_epoch());
+    _latency = duration_cast<Microseconds>(timeNow - Microseconds(timePacket));
+
+    LOG_INFO("server", "> Latency {}", Warhead::Time::ToTimeString(_latency));
+}
+
+void ClientSocket::SendAuthSession()
+{
+    DiscordPacket packet(CLIENT_AUTH_SESSION, 1);
+    packet << _accountName;
+    packet << _accountKey;
+    packet << GitRevision::GetCompanyNameStr();
+    packet << GitRevision::GetFileVersionStr();
+    packet << uint32(WARHEAD_DISCORD_VERSION);
+    packet << int64(_serverID);
+    SendPacket(&packet);
+
+    _startTime = std::chrono::steady_clock::now();
+
+    AsyncRead();
 }

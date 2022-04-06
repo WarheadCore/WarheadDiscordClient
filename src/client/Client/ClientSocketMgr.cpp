@@ -33,8 +33,8 @@ void ClientSocketMgr::Disconnect()
     _stopped = true;
     _updateTimer->cancel();
 
-    if (_clientSocket && !_clientSocket->IsStoped())
-        _clientSocket->Stop();
+    if (_clientSocket && _clientSocket->IsOpen())
+        _clientSocket->CloseSocket();
 
     _clientSocket.reset();
 }
@@ -50,10 +50,13 @@ void ClientSocketMgr::Update()
     if (!_clientSocket)
         return;
 
-    if (_clientSocket->IsStoped())
+    if (!_clientSocket->Update())
     {
-        _clientSocket->Stop();
+        _clientSocket->CloseSocket();
         _clientSocket.reset();
+        LOG_WARN("server", "> Socket is closed. Start reconnect");
+        ConnectToServer(3);
+        return;
     }
 
     if (_bufferQueue.IsEmpty())
@@ -110,11 +113,15 @@ void ClientSocketMgr::SendPacket(DiscordPacket const& packet)
     _clientSocket->AddPacketToQueue(packet);
 }
 
-void ClientSocketMgr::ConnectToServer()
+void ClientSocketMgr::ConnectToServer(uint32 reconnectCount /*= 1*/)
 {
+    _updateTimer->cancel();
+
     _updateTimer->expires_from_now(boost::posix_time::milliseconds(1));
-    _updateTimer->async_wait([this](boost::system::error_code const&)
+    _updateTimer->async_wait([this, reconnectCount](boost::system::error_code const&)
     {
+        std::lock_guard<std::mutex> _guard(_newConnectLock);
+
         if (_clientSocket && _clientSocket->IsOpen())
         {
             LOG_ERROR("discord.client", "> Connection is already exist");
@@ -129,21 +136,32 @@ void ClientSocketMgr::ConnectToServer()
 
         LOG_INFO("discord.client", "> Start connect to discord server...");
 
-        try
+        for (size_t i = 0; i < reconnectCount; i++)
         {
-            tcp::socket clientSocket(Warhead::Asio::get_io_context(*_updateTimer));
-            clientSocket.connect(tcp::endpoint(*_address, sDiscordConfig->GetOption<uint16>("Discord.Server.Port")));
+            try
+            {
+                tcp::socket clientSocket(Warhead::Asio::get_io_context(*_updateTimer));
+                clientSocket.connect(tcp::endpoint(*_address, sDiscordConfig->GetOption<uint16>("Discord.Server.Port")));
 
-            _clientSocket = std::make_shared<ClientSocket>(std::move(clientSocket), Warhead::Asio::get_io_context(*_updateTimer));
-            _clientSocket->Start();
-        }
-        catch (boost::system::system_error const& err)
-        {
-            LOG_WARN("node", "Failed connet. Error {}", err.what());
-            return;
+                _clientSocket = std::make_shared<ClientSocket>(std::move(clientSocket));
+                _clientSocket->Start();
+
+                _updateTimer->expires_from_now(boost::posix_time::milliseconds(1));
+                _updateTimer->async_wait([this](boost::system::error_code const&) { Update(); });
+                return;
+            }
+            catch (boost::system::system_error const& err)
+            {
+                LOG_WARN("node", "Failed connet. Error {}", err.what());
+            }
+
+            if (i + 1 < reconnectCount)
+            {
+                LOG_WARN("node", "> Wait 5 seconds before next connect");
+                std::this_thread::sleep_for(5s);
+            }
         }
 
-        _updateTimer->expires_from_now(boost::posix_time::milliseconds(1));
-        _updateTimer->async_wait([this](boost::system::error_code const&) { Update(); });
+        Disconnect();
     });
 }
